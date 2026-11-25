@@ -1,0 +1,8 @@
+.brand-logo-img {
+      max-width: 220px;
+      width: 100%;
+      height: auto;
+      display: block;
+      mix-blend-mode: screen;
+      filter: invert(1) contrast(1.25);
+    }

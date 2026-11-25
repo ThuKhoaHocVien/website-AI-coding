@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>KID SQL</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}" />
+  <style>
+    * { box-sizing: border-box; }
+
+    /* Canvas nền mạng nhện hút theo con trỏ chuột */
+    #spider_bg {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Dấu chấm con trỏ chuột màu xanh */
+    .blue-cursor-dot {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #e0f2fe;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.95), 0 0 24px rgba(14, 165, 233, 0.55);
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-100px, -100px) translate(-50%, -50%);
+      transition: width 0.14s ease, height 0.14s ease, background-color 0.14s ease;
+    }
+    .blue-cursor-dot.clicking {
+      width: 16px;
+      height: 16px;
+      background: #7dd3fc;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      body, body * {
+        cursor: none !important;
+      }
+    }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      max-width: 1020px;
+      margin: 24px auto;
+      padding: 0 16px 36px;
+      line-height: 1.5;
+      background: #0b1120;
+      color: #e2e8f0;
+      transition: max-width 0.2s ease;
+      position: relative;
+      min-height: 100vh;
+    }
+    body.split-mode {
+      max-width: 1480px;
+    }
+
+    .page-shell {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Khu vực Logo Ghost Project + Credit */
+    .brand-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      margin-bottom: 22px;
+      padding: 8px 12px;
+    }
+    .brand-logo-canvas {
+      max-width: 240px;
+      width: 100%;
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.45));
+    }
+    .brand-credits {
+      margin-top: 6px;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: #cbd5e1;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 8px;
+      padding: 6px 16px;
+      backdrop-filter: blur(4px);
+    }
+    .brand-credits strong {
+      color: #38bdf8;
+    }
+
+    h2, h3 {
+      margin-top: 0;
+      color: #f8fafc;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+    }
+
+    /* Bố cục bật/tắt chia đôi */
+    .workspace-grid {
+      display: block;
+    }
+    body.split-mode .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+    body.split-mode .db-pane {
+      max-height: 78vh;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    /* Khung editor kiểu IDE nhiều màu */
+    .ide-wrapper {
+      position: relative;
+      width: 100%;
+      height: 200px;
+      border: 1px solid #38bdf8;
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(27, 30, 43, 0.94) 0%, rgba(22, 24, 34, 0.94) 100%);
+      overflow: hidden;
+      box-shadow: 0 8px 26px rgba(2, 132, 199, 0.22), inset 0 0 0 1px rgba(197, 134, 192, 0.15);
+    }
+    .ide-layer {
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      padding: 12px 14px;
+      font-family: Consolas, "Fira Code", "Cascadia Code", monospace;
+      font-size: 14px;
+      line-height: 1.55;
+      letter-spacing: 0;
+      tab-size: 4;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow: auto;
+    }
+    .ide-highlight {
+      color: #4fc1ff;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .ide-textarea {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      color: transparent;
+      caret-color: #38bdf8;
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+    }
+    .ide-textarea::selection {
+      background: rgba(56, 189, 248, 0.28);
+    }
+
+    /* Bảng màu sặc sỡ kiểu IDE cho SQL */
+    .sql-kw {
+      color: #c586c0;
+      font-weight: 700;
+      text-shadow: 0 0 8px rgba(197, 134, 192, 0.25);
+    }
+    .sql-ident {
+      color: #4fc1ff;
+      font-weight: 500;
+    }
+    .sql-dquote {
+      color: #ffffff;
+      font-weight: 500;
+    }
+    .sql-fn {
+      color: #fde047;
+      font-weight: 600;
+    }
+    .sql-str {
+      color: #fb923c;
+    }
+    .sql-num {
+      color: #4ade80;
+      font-weight: 600;
+    }
+    .sql-cmt {
+      color: #6ee7b7;
+      font-style: italic;
+      opacity: 0.85;
+    }
+    .sql-punct {
+      color: #f472b6;
+      font-weight: 700;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: rgba(30, 41, 59, 0.92);
+      color: #f1f5f9;
+      transition: transform 0.1s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    button:hover {
+      background: #334155;
+      border-color: #38bdf8;
+      transform: translateY(-1px);
+    }
+    button.primary {
+      background: linear-gradient(135deg, #2563eb, #0ea5e9);
+      color: #ffffff;
+      border-color: #38bdf8;
+      font-weight: 600;
+    }
+    button.primary:hover {
+      background: linear-gradient(135deg, #1d4ed8, #0284c7);
+    }
+    button.active-toggle {
+      background: linear-gradient(135deg, #0d9488, #2563eb);
+      color: #ffffff;
+      border-color: #5eead4;
+      font-weight: 600;
+    }
+
+    .ok {
+      background: rgba(20, 83, 45, 0.9);
+      color: #dcfce7;
+      border-left: 4px solid #22c55e;
+      padding: 10px 14px;
+      margin: 14px 0;
+      border-radius: 6px;
+    }
+    .err {
+      background: rgba(127, 29, 29, 0.9);
+      color: #fee2e2;
+      border-left: 4px solid #ef4444;
+      padding: 10px 14px;
+      margin: 14px 0;
+      border-radius: 6px;
+    }
+    pre.schema-box {
+      background: rgba(22, 24, 34, 0.95);
+      color: #4fc1ff;
+      padding: 12px;
+      overflow-x: auto;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: Consolas, monospace;
+      border: 1px solid #334155;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 13px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #e2e8f0;
+    }
+    th, td {
+      border: 1px solid #334155;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    th {
+      background: linear-gradient(90deg, rgba(88, 28, 135, 0.45), rgba(30, 58, 138, 0.45));
+      color: #7dd3fc;
+    }
+    .table-box {
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(4px);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 18px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    }
+
+    @media (max-width: 900px) {
+      body.split-mode .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+      body.split-mode .db-pane {
+        max-height: none;
+        overflow-y: visible;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="spider_bg" aria-hidden="true"></canvas>
+  <div id="blue_cursor_dot" class="blue-cursor-dot" aria-hidden="true"></div>
+
+  <div class="page-shell">
+    <!-- Logo Ghost Project (tự xóa nền) + Credit -->
+    <header class="brand-header">
+      <canvas id="ghost_logo_canvas" class="brand-logo-canvas" aria-label="Ghost Project Logo"></canvas>
+      <div class="brand-credits">
+        <div><strong>Front-end:</strong> Phạm Hoàng Nhân</div>
+        <div><strong>Back-end:</strong> Lê Quang Minh</div>
+      </div>
+    </header>
+
+    <h2>SQL CHO TRUNG KID</h2>
+
+    <div class="workspace-grid">
+      <div class="editor-pane">
+        <form method="POST">
+          <label for="sql_query"><strong>Nhập vô đêy:</strong></label><br /><br />
+
+          <div class="ide-wrapper">
+            <pre id="sql_highlight" class="ide-layer ide-highlight" aria-hidden="true"></pre>
+            <textarea
+              id="sql_query"
+              name="sql_query"
+              class="ide-layer ide-textarea"
+              spellcheck="false"
+              placeholder='CREATE TABLE "books" (
+    "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "title" TEXT NOT NULL,
+    "price" REAL DEFAULT 99.5
+);
+
+-- Hoặc thử truy vấn:
+SELECT full_name, gpa FROM students WHERE gpa >= 3.0;'
+            >{{ sql_query }}</textarea>
+          </div>
+
+          <div class="btn-row">
+            <button type="submit" name="action" value="run_sql" class="primary">Chạy SQL</button>
+            <button type="submit" name="action" value="seed_random">Thêm dữ liệu ngẫu nhiên</button>
+            <button type="submit" name="action" value="reset_db">Reset DB mẫu</button>
+            <button type="button" id="toggle_split_btn" aria-pressed="false">Chia đôi bảng</button>
+          </div>
+        </form>
+
+        {% if message %}
+          <div class="ok">{{ message }}</div>
+        {% endif %}
+
+        {% if error %}
+          <div class="err">{{ error }}</div>
+        {% endif %}
+
+        {% if select_columns %}
+          <h3>Kết quả truy vấn</h3>
+          <table>
+            <thead>
+              <tr>
+                {% for col in select_columns %}
+                  <th>{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in select_rows %}
+                <tr>
+                  {% for col in select_columns %}
+                    <td>{{ r[col] }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+
+      <div class="db-pane">
+        <h3>Các bảng hiện có trong <code>lab.db</code></h3>
+        {% if tables %}
+          {% for t in tables %}
+            <div class="table-box">
+              <strong>Bảng: {{ t["name"] }}</strong>
+              <pre class="schema-box">{{ t["sql"] }}</pre>
+              {% if t["rows"] %}
+                <table>
+                  <thead>
+                    <tr>
+                      {% for col in t["columns"] %}
+                        <th>{{ col }}</th>
+                      {% endfor %}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for r in t["rows"] %}
+                      <tr>
+                        {% for col in t["columns"] %}
+                          <td>{{ r[col] }}</td>
+                        {% endfor %}
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <p><em>Bảng chưa có dữ liệu.</em></p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <p><em>Chưa có bảng nào trong database.</em></p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* --- 0. Tự nhận diện & xóa nền logo Ghost Project (nền trắng, đen hay màu đều được) --- */
+    (function renderTransparentGhostLogo() {
+      const logoCanvas = document.getElementById("ghost_logo_canvas");
+      if (!logoCanvas) return;
+      const ctx = logoCanvas.getContext("2d", { willReadFrequently: true });
+
+      const img = new Image();
+      img.onerror = () => console.error("Không tải được ảnh logo:", img.src);
+      img.onload = function () {
+        const W = (logoCanvas.width = img.naturalWidth);
+        const H = (logoCanvas.height = img.naturalHeight);
+        ctx.drawImage(img, 0, 0);
+
+        let imgData;
+        try {
+          imgData = ctx.getImageData(0, 0, W, H);
+        } catch (e) {
+          console.error("Canvas bị chặn (hãy chạy qua Flask, đừng mở file HTML trực tiếp):", e);
+          return;
+        }
+        const data = imgData.data;
+
+        // Lấy màu nền trung bình từ 4 góc ảnh
+        const corners = [[2, 2], [W - 3, 2], [2, H - 3], [W - 3, H - 3]];
+        let br = 0, bg = 0, bb = 0;
+        corners.forEach(([cx, cy]) => {
+          const i = (cy * W + cx) * 4;
+          br += data[i]; bg += data[i + 1]; bb += data[i + 2];
+        });
+        br /= 4; bg /= 4; bb /= 4;
+
+        // Ngưỡng và hệ số: chỉnh 2 số này nếu logo bị mất chi tiết hoặc còn viền nền
+        const THRESHOLD = 25;
+        const GAIN = 2.2;
+
+        let minX = W, minY = H, maxX = 0, maxY = 0;
+
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 4;
+            // Độ khác biệt so với màu nền
+            const dist = Math.max(
+              Math.abs(data[i] - br),
+              Math.abs(data[i + 1] - bg),
+              Math.abs(data[i + 2] - bb)
+            );
+
+            if (dist < THRESHOLD) {
+              data[i + 3] = 0; // giống nền -> trong suốt
+            } else {
+              const alpha = Math.min(255, Math.round((dist - THRESHOLD) * GAIN));
+              data[i] = 255;     // R (trắng)
+              data[i + 1] = 255; // G
+              data[i + 2] = 255; // B
+              data[i + 3] = alpha;
+              if (alpha > 40) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+
+        // Cắt bớt khoảng trống xung quanh logo
+        if (maxX > minX && maxY > minY) {
+          const pad = 12;
+          const cropX = Math.max(0, minX - pad);
+          const cropY = Math.max(0, minY - pad);
+          const cropW = Math.min(W - cropX, maxX - minX + pad * 2);
+          const cropH = Math.min(H - cropY, maxY - minY + pad * 2);
+
+          const cropped = ctx.getImageData(cropX, cropY, cropW, cropH);
+          logoCanvas.width = cropW;
+          logoCanvas.height = cropH;
+          ctx.putImageData(cropped, 0, 0);
+        }
+      };
+      img.src = "{{ url_for('static', filename='ghost_logo.png') }}";
+    })();
+
+    /* --- 1. Dấu chấm chuột xanh & Mạng nhện hút theo chuột --- */
+    (function initSpiderWebAndCursor() {
+      const dot = document.getElementById("blue_cursor_dot");
+      const canvas = document.getElementById("spider_bg");
+      const ctx = canvas.getContext("2d");
+
+      const mouse = {
+        x: -9999,
+        y: -9999,
+        active: false,
+        attractRadius: 210,
+        linkRadius: 175
+      };
+
+      const PARTICLE_LINK_DIST = 125;
+      let particles = [];
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const targetCount = Math.min(115, Math.max(45, Math.floor((canvas.width * canvas.height) / 14500)));
+
+        particles = Array.from({ length: targetCount }, () => ({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.85,
+          vy: (Math.random() - 0.5) * 0.85,
+          r: Math.random() * 1.8 + 1.4
+        }));
+      }
+
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      window.addEventListener("mousemove", (e) => {
+        mouse.x = e.clientX;
+        mouse.y = e.clientY;
+        mouse.active = true;
+        if (dot) {
+          dot.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`;
+        }
+      });
+
+      window.addEventListener("mousedown", () => {
+        if (dot) dot.classList.add("clicking");
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (dot) dot.classList.remove("clicking");
+      });
+
+      document.addEventListener("mouseleave", () => {
+        mouse.active = false;
+        mouse.x = -9999;
+        mouse.y = -9999;
+        if (dot) {
+          dot.style.transform = "translate(-100px, -100px) translate(-50%, -50%)";
+        }
+      });
+
+      function animateSpiderWeb() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+
+          if (mouse.active) {
+            const dx = mouse.x - p.x;
+            const dy = mouse.y - p.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist < mouse.attractRadius && dist > 18) {
+              const pull = (1 - dist / mouse.attractRadius) * 0.045;
+              p.vx += (dx / dist) * pull;
+              p.vy += (dy / dist) * pull;
+            }
+          }
+
+          p.vx *= 0.985;
+          p.vy *= 0.985;
+
+          const speed = Math.hypot(p.vx, p.vy);
+          if (speed < 0.25) {
+            p.vx += (Math.random() - 0.5) * 0.08;
+            p.vy += (Math.random() - 0.5) * 0.08;
+          }
+
+          p.x += p.vx;
+          p.y += p.vy;
+
+          if (p.x <= 0 || p.x >= canvas.width) p.vx *= -1;
+          if (p.y <= 0 || p.y >= canvas.height) p.vy *= -1;
+          p.x = Math.max(0, Math.min(canvas.width, p.x));
+          p.y = Math.max(0, Math.min(canvas.height, p.y));
+        }
+
+        for (let i = 0; i < particles.length; i++) {
+          const p1 = particles[i];
+
+          for (let j = i + 1; j < particles.length; j++) {
+            const p2 = particles[j];
+            const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+
+            if (dist < PARTICLE_LINK_DIST) {
+              const alpha = (1 - dist / PARTICLE_LINK_DIST) * 0.42;
+              ctx.strokeStyle = `rgba(56, 189, 248, ${alpha.toFixed(3)})`;
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(p1.x, p1.y);
+              ctx.lineTo(p2.x, p2.y);
+              ctx.stroke();
+            }
+          }
+
+          if (mouse.active) {
+            const mDist = Math.hypot(p1.x - mouse.x, p1.y - mouse.y);
+            if (mDist < mouse.linkRadius) {
+              const alpha = (1 - mDist / mouse.linkRadius) * 0.78;
+              ctx.strokeStyle = `rgba(125, 211, 252, ${alpha.toFixed(3)})`;
+              ctx.lineWidth = 1.25;
+              ctx.beginPath();
+              ctx.moveTo(mouse.x, mouse.y);
+              ctx.lineTo(p1.x, p1.y);
+              ctx.stroke();
+            }
+          }
+
+          ctx.fillStyle = "rgba(125, 211, 252, 0.88)";
+          ctx.beginPath();
+          ctx.arc(p1.x, p1.y, p1.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        requestAnimationFrame(animateSpiderWeb);
+      }
+
+      animateSpiderWeb();
+    })();
+
+    /* --- 2. Highlight nhiều màu cho SQL & Nút chia đôi bảng --- */
+    const textarea = document.getElementById("sql_query");
+    const highlight = document.getElementById("sql_highlight");
+    const toggleSplitBtn = document.getElementById("toggle_split_btn");
+    const SPLIT_STORAGE_KEY = "sql_lab_split_mode";
+
+    const KEYWORDS = new Set([
+      "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
+      "DELETE", "CREATE", "TABLE", "ALTER", "ADD", "COLUMN", "DROP", "IF",
+      "EXISTS", "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "NOT", "NULL",
+      "UNIQUE", "DEFAULT", "CHECK", "AUTOINCREMENT", "ON", "CASCADE",
+      "JOIN", "INNER", "LEFT", "RIGHT", "GROUP", "BY", "ORDER", "ASC", "DESC",
+      "LIMIT", "OFFSET", "AND", "OR", "IN", "BETWEEN", "LIKE", "AS", "DISTINCT",
+      "INTEGER", "INT", "TEXT", "VARCHAR", "REAL", "FLOAT", "NUMERIC", "BLOB",
+      "PRAGMA"
+    ]);
+
+    const FUNCTIONS = new Set([
+      "COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "IFNULL", "LOWER",
+      "UPPER", "LENGTH", "ROUND", "ABS", "DATE", "DATETIME", "CURRENT_TIMESTAMP"
+    ]);
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function highlightSQL(code) {
+      const tokenRegex = /(--[^\n]*|"(?:""|[^"])*"|'(?:''|[^'])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b|[(),;=<>!+\-*/]|.)/gs;
+      let out = "";
+      let match;
+
+      while ((match = tokenRegex.exec(code)) !== null) {
+        const tok = match[0];
+
+        if (tok.startsWith("--")) {
+          out += `<span class="sql-cmt">${escapeHtml(tok)}</span>`;
+        } else if (tok.startsWith('"')) {
+          out += `<span class="sql-dquote">${escapeHtml(tok)}</span>`;
+        } else if (tok.startsWith("'")) {
+          out += `<span class="sql-str">${escapeHtml(tok)}</span>`;
+        } else if (/^\d/.test(tok)) {
+          out += `<span class="sql-num">${escapeHtml(tok)}</span>`;
+        } else if (/^[A-Za-z_]/.test(tok)) {
+          const upper = tok.toUpperCase();
+          if (KEYWORDS.has(upper)) {
+            out += `<span class="sql-kw">${escapeHtml(tok)}</span>`;
+          } else if (FUNCTIONS.has(upper)) {
+            out += `<span class="sql-fn">${escapeHtml(tok)}</span>`;
+          } else {
+            out += `<span class="sql-ident">${escapeHtml(tok)}</span>`;
+          }
+        } else if (/^[(),;=<>!+\-*/]$/.test(tok)) {
+          out += `<span class="sql-punct">${escapeHtml(tok)}</span>`;
+        } else {
+          out += escapeHtml(tok);
+        }
+      }
+
+      if (code.endsWith("\n")) {
+        out += " ";
+      }
+      return out;
+    }
+
+    function syncEditor() {
+      highlight.innerHTML = highlightSQL(textarea.value);
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    }
+
+    function setSplitMode(enabled) {
+      document.body.classList.toggle("split-mode", enabled);
+      toggleSplitBtn.classList.toggle("active-toggle", enabled);
+      toggleSplitBtn.setAttribute("aria-pressed", String(enabled));
+      try {
+        localStorage.setItem(SPLIT_STORAGE_KEY, enabled ? "1" : "0");
+      } catch (_) {}
+    }
+
+    toggleSplitBtn.addEventListener("click", () => {
+      const nextState = !document.body.classList.contains("split-mode");
+      setSplitMode(nextState);
+    });
+
+    textarea.addEventListener("input", syncEditor);
+    textarea.addEventListener("scroll", () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    });
+
+    textarea.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const val = textarea.value;
+        textarea.value = val.slice(0, start) + "    " + val.slice(end);
+        textarea.selectionStart = textarea.selectionEnd = start + 4;
+        syncEditor();
+      }
+    });
+
+    const savedSplit = (() => {
+      try {
+        return localStorage.getItem(SPLIT_STORAGE_KEY) === "1";
+      } catch (_) {
+        return false;
+      }
+    })();
+
+    setSplitMode(savedSplit);
+    syncEditor();
+  </script>
+</body>
+</html>
